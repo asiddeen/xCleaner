@@ -55,6 +55,10 @@ struct MainShellView: View {
             if let first = viewModel.smartJunkReport?.items.first {
                 viewModel.inspectorSubject = .scannable(first)
             }
+        case .appUninstaller:
+            if let firstApp = viewModel.installedApps.first, let firstLoc = firstApp.locations.first {
+                viewModel.inspectorSubject = .appLocation(firstApp, firstLoc)
+            }
         case .toolchainsAndDocker:
             if let first = viewModel.toolchainItems.first {
                 viewModel.inspectorSubject = .toolchain(first)
@@ -146,6 +150,9 @@ struct MainShellView: View {
         case .smartJunk:
             guard let bytes = viewModel.smartJunkReport?.totalFoundBytes, bytes > 0 else { return nil }
             return ByteFormatting.string(from: bytes)
+        case .appUninstaller:
+            let count = viewModel.installedApps.count
+            return count > 0 ? "\(count) apps" : nil
         case .toolchainsAndDocker:
             let sum = viewModel.toolchainItems.reduce(Int64(0)) { $0 + $1.allocatedBytes }
             return sum > 0 ? ByteFormatting.string(from: sum) : nil
@@ -164,6 +171,8 @@ struct MainShellView: View {
             StoragePulseView(viewModel: viewModel)
         case .smartJunk:
             SmartJunkView(viewModel: viewModel)
+        case .appUninstaller:
+            AppUninstallerView(viewModel: viewModel)
         case .toolchainsAndDocker:
             ToolchainsAndDockerView(viewModel: viewModel)
         case .visualExplorer:

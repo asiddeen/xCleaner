@@ -6,6 +6,7 @@ import XCleanerCore
 enum SidebarSection: String, CaseIterable, Identifiable {
     case storagePulse = "Storage Pulse"
     case smartJunk = "Smart Junk"
+    case appUninstaller = "App Uninstaller"
     case toolchainsAndDocker = "Toolchains & Docker"
     case visualExplorer = "Visual Explorer"
     case largeFiles = "Large & Stale Files"
@@ -18,6 +19,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         switch self {
         case .storagePulse: return "gauge.with.dots.needle.67percent"
         case .smartJunk: return "sparkles.rectangle.stack"
+        case .appUninstaller: return "app.badge.checkmark"
         case .toolchainsAndDocker: return "shippingbox.and.arrow.backward"
         case .visualExplorer: return "square.grid.3x2"
         case .largeFiles: return "doc.badge.clock"
@@ -30,6 +32,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         switch self {
         case .storagePulse: return "APFS & Swap Health"
         case .smartJunk: return "Caches, Apps & Builds"
+        case .appUninstaller: return "Uninstall & Leftover Sweep"
         case .toolchainsAndDocker: return "SDKs, Runtimes & SSH"
         case .visualExplorer: return "Size Bars & Treemap"
         case .largeFiles: return "Installers & Archives"
@@ -44,6 +47,7 @@ enum InspectorSubject: Equatable {
     case toolchain(ToolchainItem)
     case diskNode(DiskNode)
     case largeFile(LargeFileItem)
+    case appLocation(InstalledAppBundle, AppAssociatedLocation)
 
     var id: String {
         switch self {
@@ -51,6 +55,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return "tool:\(i.id)"
         case .diskNode(let n): return "node:\(n.id)"
         case .largeFile(let f): return "large:\(f.id)"
+        case .appLocation(let app, let loc): return "apploc:\(app.id):\(loc.id)"
         }
     }
 
@@ -60,6 +65,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return "\(i.componentKind) (\(i.version))"
         case .diskNode(let n): return n.name
         case .largeFile(let f): return f.name
+        case .appLocation(let app, let loc): return "\(app.displayName) — \(loc.category.rawValue)"
         }
     }
 
@@ -69,6 +75,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.primaryURL
         case .diskNode(let n): return n.url
         case .largeFile(let f): return f.url
+        case .appLocation(_, let loc): return loc.url
         }
     }
 
@@ -78,6 +85,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.urls
         case .diskNode(let n): return [n.url]
         case .largeFile(let f): return [f.url]
+        case .appLocation(_, let loc): return [loc.url]
         }
     }
 
@@ -87,6 +95,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.allocatedBytes
         case .diskNode(let n): return n.allocatedBytes
         case .largeFile(let f): return f.allocatedBytes
+        case .appLocation(_, let loc): return loc.allocatedBytes
         }
     }
 
@@ -96,6 +105,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.urls.count
         case .diskNode(let n): return n.itemCount
         case .largeFile: return 1
+        case .appLocation(_, let loc): return loc.itemCount
         }
     }
 
@@ -105,6 +115,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.lastModified
         case .diskNode(let n): return n.lastModified
         case .largeFile(let f): return f.lastModified
+        case .appLocation(_, let loc): return loc.lastModified
         }
     }
 
@@ -114,6 +125,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.advisory
         case .diskNode(let n): return n.advisory
         case .largeFile(let f): return f.advisory
+        case .appLocation(_, let loc): return loc.advisory
         }
     }
 
@@ -123,6 +135,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.ecosystem.rawValue
         case .diskNode: return "Visual Explorer"
         case .largeFile(let f): return f.category.rawValue
+        case .appLocation(let app, _): return "App Uninstaller (\(app.displayName))"
         }
     }
 
@@ -132,6 +145,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.advisory.lockedByBundleID
         case .diskNode(let n): return n.advisory.lockedByBundleID
         case .largeFile(let f): return f.advisory.lockedByBundleID
+        case .appLocation(let app, let loc): return app.bundleID ?? loc.advisory.lockedByBundleID
         }
     }
 
@@ -141,6 +155,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.advisory.lockedByAppName
         case .diskNode(let n): return n.advisory.lockedByAppName
         case .largeFile(let f): return f.advisory.lockedByAppName
+        case .appLocation(let app, _): return app.displayName
         }
     }
 
@@ -179,6 +194,7 @@ final class AppViewModel {
 
     private let volumeMonitor = APFSVolumeMonitor()
     private let smartScanner: SmartJunkScanner
+    private let appUninstallerScanner: AppUninstallerScanner
     private let toolchainScanner: ToolchainVersionScanner
     private let diskScanner: ConcurrentDiskScanner
     private let largeFileScanner: LargeFileScanner
@@ -189,6 +205,7 @@ final class AppViewModel {
     // Data Snapshots
     var volumeMetrics: VolumeMetrics?
     var smartJunkReport: SmartJunkScanReport?
+    var installedApps: [InstalledAppBundle] = []
     var toolchainItems: [ToolchainItem] = []
     var projectReferences = ProjectToolchainReferences()
     var localDockerStatus: LocalDockerStatus?
@@ -213,6 +230,7 @@ final class AppViewModel {
     // Loading Flags & Active Cancellable Tasks
     var isRefreshingVolume = false
     var isScanningSmartJunk = false
+    var isScanningApps = false
     var isScanningToolchains = false
     var isProbingDockerOrSSH = false
     var isScanningExplorer = false
@@ -247,6 +265,7 @@ final class AppViewModel {
         self.runningAppGuard = appGuard
 
         self.smartScanner = SmartJunkScanner(safetyPolicy: policy)
+        self.appUninstallerScanner = AppUninstallerScanner(safetyPolicy: policy)
         self.toolchainScanner = ToolchainVersionScanner(safetyPolicy: policy)
         self.diskScanner = ConcurrentDiskScanner(advisoryEngine: advisory)
         self.largeFileScanner = LargeFileScanner(advisoryEngine: advisory)
@@ -271,6 +290,7 @@ final class AppViewModel {
         Task {
             await refreshVolumeMetrics()
             launchSmartJunkScan()
+            launchAppScan()
             await refreshToolchainsAndLocalDocker()
         }
     }
@@ -387,6 +407,89 @@ final class AppViewModel {
     func cancelSmartJunkScan() {
         smartScanTask?.cancel()
         isScanningSmartJunk = false
+    }
+
+    // MARK: - App Uninstaller & Leftover Scanner
+
+    func launchAppScan() {
+        isScanningApps = true
+        let scanner = appUninstallerScanner
+        let keepStore = keepListStore
+        let appGuard = runningAppGuard
+
+        Task {
+            defer { self.isScanningApps = false }
+            let running = await appGuard.activeApplications()
+            let apps = await Task.detached(priority: .userInitiated) {
+                scanner.scanInstalledApps(runningApps: running, keepList: keepStore)
+            }.value
+            guard !Task.isCancelled else { return }
+            self.installedApps = apps
+        }
+    }
+
+    func stageAppSafeCaches(_ app: InstalledAppBundle) {
+        let safeLocations = app.locations.filter { $0.category == .safeCacheOrLog && $0.advisory.canBeStaged }
+        var added = 0
+        for loc in safeLocations {
+            let target = InspectorSubject.appLocation(app, loc).toStageTarget()
+            if !isStaged(urls: target.urls) {
+                toggleStage(target: target)
+                added += 1
+            }
+        }
+        if added > 0 {
+            notifications.postNotice(
+                severity: .info,
+                title: "Staged \(added) Cache(s) for \(app.displayName)",
+                message: "App binary and preferences stay intact."
+            )
+        }
+    }
+
+    func stageAppReset(_ app: InstalledAppBundle) {
+        let nonBinaryLocations = app.locations.filter { $0.category != .appBundle && $0.advisory.canBeStaged }
+        var added = 0
+        for loc in nonBinaryLocations {
+            let target = InspectorSubject.appLocation(app, loc).toStageTarget()
+            if !isStaged(urls: target.urls) {
+                toggleStage(target: target)
+                added += 1
+            }
+        }
+        if added > 0 {
+            notifications.postNotice(
+                severity: .caution,
+                title: "Staged Factory Reset for \(app.displayName)",
+                message: "Staged caches, support files, and preferences. App bundle stays in /Applications."
+            )
+        }
+    }
+
+    func stageFullAppUninstall(_ app: InstalledAppBundle) {
+        guard !app.isSystemProtected else {
+            notifications.postNotice(
+                severity: .warning,
+                title: "System App Protected",
+                message: "\(app.displayName) cannot be uninstalled."
+            )
+            return
+        }
+        var added = 0
+        for loc in app.locations where loc.advisory.canBeStaged {
+            let target = InspectorSubject.appLocation(app, loc).toStageTarget()
+            if !isStaged(urls: target.urls) {
+                toggleStage(target: target)
+                added += 1
+            }
+        }
+        if added > 0 {
+            notifications.postNotice(
+                severity: .warning,
+                title: "Staged Full Uninstall of \(app.displayName)",
+                message: "App bundle + all ~/Library leftovers staged into Cleanup Queue."
+            )
+        }
     }
 
     // MARK: - Toolchains, Local Docker & Remote SSH Servers
@@ -873,6 +976,18 @@ final class AppViewModel {
                         lastModified: f.lastModified,
                         lastAccessed: f.lastAccessed,
                         advisory: f.advisory.withPinState(pinned)
+                    )
+                )
+            case .appLocation(let app, let loc):
+                inspectorSubject = .appLocation(
+                    app,
+                    AppAssociatedLocation(
+                        url: loc.url,
+                        category: loc.category,
+                        allocatedBytes: loc.allocatedBytes,
+                        itemCount: loc.itemCount,
+                        lastModified: loc.lastModified,
+                        advisory: loc.advisory.withPinState(pinned)
                     )
                 )
             }

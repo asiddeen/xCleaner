@@ -156,6 +156,7 @@ public struct SafetyPolicyEngine: Sendable {
             "\(homePath)/Library/Caches",
             "\(homePath)/Library/Containers",
             "\(homePath)/Library/Group Containers",
+            "\(homePath)/Library/Preferences",
             "\(homePath)/Movies",
             "\(homePath)/Music",
             "\(homePath)/Pictures",
@@ -173,6 +174,26 @@ public struct SafetyPolicyEngine: Sendable {
         // Hard OS & SIP prefixes
         for prefix in Self.hardSystemPrefixes {
             if path == prefix || path.hasPrefix(prefix + "/") {
+                // Allow staging individual third-party .app bundles inside /Applications or ~/Applications (never root /Applications or system apps)
+                if prefix == "/Applications" {
+                    if path.hasSuffix(".app") || path.contains(".app/") {
+                        let appBundlePath: String
+                        if let range = path.range(of: ".app") {
+                            appBundlePath = String(path[..<range.upperBound])
+                        } else {
+                            appBundlePath = path
+                        }
+                        let lastComp = URL(fileURLWithPath: appBundlePath).lastPathComponent.lowercased()
+                        if lastComp == "xcleaner.app" || lastComp.hasPrefix("apple") {
+                            return .blocked(
+                                title: "Protected Application",
+                                explanation: "xCleaner and core system application bundles are protected."
+                            )
+                        }
+                        // User-installed third-party app in /Applications can be uninstalled via warning gate
+                        return .allowed
+                    }
+                }
                 return .blocked(
                     title: "macOS System / Installed Binaries",
                     explanation: "System directories and installed application bundles outside user caches are protected to keep macOS stable."
@@ -211,7 +232,6 @@ public struct SafetyPolicyEngine: Sendable {
             ("\(homePath)/.gemini/google_accounts.json", "Account Credentials", "Active Google account configuration."),
             ("\(homePath)/.gemini/jetski-standalone-oauth-token", "Auth Token", "Active authentication token."),
             ("\(homePath)/Library/Keychains", "macOS Keychains", "Stores encrypted macOS login passwords, certificates, and secrets."),
-            ("\(homePath)/Library/Preferences", "macOS App Preferences", "Stores active cfprefsd .plist configuration files for macOS and apps."),
             ("\(homePath)/Library/Mail", "Apple Mail Database", "Stores local Apple Mail messages and account mailboxes."),
             ("\(homePath)/Library/Messages", "iMessage Database", "Stores Messages chat database and attachments."),
             ("\(homePath)/Library/Safari", "Safari Bookmarks & State", "Stores Safari bookmarks, history, and extensions."),
@@ -247,6 +267,16 @@ public struct SafetyPolicyEngine: Sendable {
         }
 
         // Browser Profile User State (Cookies, Login Data, Bookmarks, History, Local Storage, IndexedDB)
+        if path.hasPrefix("\(homePath)/Library/Preferences/") {
+            let lastPlist = url.lastPathComponent.lowercased()
+            if lastPlist.hasPrefix("com.apple.") || lastPlist.hasPrefix(".globalpreferences") {
+                return .blocked(
+                    title: "macOS System Preference",
+                    explanation: "System and Apple preference plists are protected."
+                )
+            }
+        }
+
         if path.hasPrefix("\(homePath)/Library/Application Support/") {
             if Self.protectedBrowserDataNames.contains(lastComponent) {
                 return .blocked(

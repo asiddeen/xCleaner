@@ -3,7 +3,7 @@ export CLANG_MODULE_CACHE_PATH := /tmp/xcleaner-clang-cache
 export SWIFTPM_MODULECACHE_OVERRIDE := /tmp/xcleaner-swiftpm-cache
 SWIFT_CACHE_FLAGS = --disable-sandbox --cache-path /tmp/xcleaner-spm-cache -Xswiftc -module-cache-path -Xswiftc /tmp/xcleaner-swift-cache -Xcc -fmodules-cache-path=/tmp/xcleaner-clang-cache
 
-.PHONY: all build release test app run clean
+.PHONY: all build release test app dmg run clean
 
 all: app
 
@@ -18,6 +18,9 @@ test:
 
 app:
 	bash scripts/bundle-app.sh
+
+dmg:
+	bash scripts/package-dmg.sh
 
 run: app
 	open dist/xCleaner.app
