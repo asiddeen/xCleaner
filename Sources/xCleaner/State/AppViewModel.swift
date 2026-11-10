@@ -47,6 +47,7 @@ enum InspectorSubject: Equatable {
     case toolchain(ToolchainItem)
     case diskNode(DiskNode)
     case largeFile(LargeFileItem)
+    case installedApp(InstalledAppBundle)
     case appLocation(InstalledAppBundle, AppAssociatedLocation)
 
     var id: String {
@@ -55,6 +56,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return "tool:\(i.id)"
         case .diskNode(let n): return "node:\(n.id)"
         case .largeFile(let f): return "large:\(f.id)"
+        case .installedApp(let app): return "app:\(app.id)"
         case .appLocation(let app, let loc): return "apploc:\(app.id):\(loc.id)"
         }
     }
@@ -65,6 +67,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return "\(i.componentKind) (\(i.version))"
         case .diskNode(let n): return n.name
         case .largeFile(let f): return f.name
+        case .installedApp(let app): return app.displayName
         case .appLocation(let app, let loc): return "\(app.displayName) — \(loc.category.rawValue)"
         }
     }
@@ -75,6 +78,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.primaryURL
         case .diskNode(let n): return n.url
         case .largeFile(let f): return f.url
+        case .installedApp(let app): return app.appURL
         case .appLocation(_, let loc): return loc.url
         }
     }
@@ -85,6 +89,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.urls
         case .diskNode(let n): return [n.url]
         case .largeFile(let f): return [f.url]
+        case .installedApp(let app): return [app.appURL] + app.locations.map(\.url)
         case .appLocation(_, let loc): return [loc.url]
         }
     }
@@ -95,6 +100,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.allocatedBytes
         case .diskNode(let n): return n.allocatedBytes
         case .largeFile(let f): return f.allocatedBytes
+        case .installedApp(let app): return app.totalFootprintBytes
         case .appLocation(_, let loc): return loc.allocatedBytes
         }
     }
@@ -105,6 +111,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.urls.count
         case .diskNode(let n): return n.itemCount
         case .largeFile: return 1
+        case .installedApp(let app): return app.locations.count + 1
         case .appLocation(_, let loc): return loc.itemCount
         }
     }
@@ -115,6 +122,8 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.lastModified
         case .diskNode(let n): return n.lastModified
         case .largeFile(let f): return f.lastModified
+        case .installedApp(let app):
+            return (try? app.appURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         case .appLocation(_, let loc): return loc.lastModified
         }
     }
@@ -125,6 +134,26 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.advisory
         case .diskNode(let n): return n.advisory
         case .largeFile(let f): return f.advisory
+        case .installedApp(let app):
+            let level: AdvisoryLevel = app.isSystemProtected ? .protected : (app.isRunning ? .warning : .caution)
+            let what: String = app.bundleID != nil
+                ? "\(app.displayName) (\(app.bundleID!)) installed application bundle with \(app.locations.count) associated ~/Library locations (\(ByteFormatting.string(from: app.totalFootprintBytes)) total footprint)."
+                : "\(app.displayName) application bundle with \(app.locations.count) associated ~/Library locations."
+            let impact: String = app.isSystemProtected
+                ? "Protected macOS system application — uninstallation is prohibited by Safety Policy Engine."
+                : (app.isRunning
+                    ? "\(app.displayName) is currently running! Quit the application before uninstalling to avoid active file lock conflicts."
+                    : "Uninstallation moves the .app bundle and its ~/Library leftovers (caches, logs, application support, preferences, and containers) to the macOS Trash.")
+            return ItemAdvisory(
+                level: level,
+                badgeTitle: app.isSystemProtected ? "System Protected" : (app.isRunning ? "Running App" : "App Bundle"),
+                whatIsThis: what,
+                consequenceIfRemoved: impact,
+                requiresExplicitAck: app.isRunning || !app.isSystemProtected,
+                referencedByProjects: [],
+                lockedByAppName: app.isRunning ? app.displayName : nil,
+                lockedByBundleID: app.bundleID
+            )
         case .appLocation(_, let loc): return loc.advisory
         }
     }
@@ -135,6 +164,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.ecosystem.rawValue
         case .diskNode: return "Visual Explorer"
         case .largeFile(let f): return f.category.rawValue
+        case .installedApp: return "App Uninstaller"
         case .appLocation(let app, _): return "App Uninstaller (\(app.displayName))"
         }
     }
@@ -145,6 +175,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.advisory.lockedByBundleID
         case .diskNode(let n): return n.advisory.lockedByBundleID
         case .largeFile(let f): return f.advisory.lockedByBundleID
+        case .installedApp(let app): return app.bundleID
         case .appLocation(let app, let loc): return app.bundleID ?? loc.advisory.lockedByBundleID
         }
     }
@@ -155,6 +186,7 @@ enum InspectorSubject: Equatable {
         case .toolchain(let i): return i.advisory.lockedByAppName
         case .diskNode(let n): return n.advisory.lockedByAppName
         case .largeFile(let f): return f.advisory.lockedByAppName
+        case .installedApp(let app): return app.displayName
         case .appLocation(let app, _): return app.displayName
         }
     }
@@ -425,6 +457,14 @@ final class AppViewModel {
             }.value
             guard !Task.isCancelled else { return }
             self.installedApps = apps
+            if self.selectedSection == .appUninstaller, let first = apps.first {
+                switch self.inspectorSubject {
+                case .installedApp, .appLocation:
+                    break
+                default:
+                    self.inspectorSubject = .installedApp(first)
+                }
+            }
         }
     }
 
@@ -978,6 +1018,8 @@ final class AppViewModel {
                         advisory: f.advisory.withPinState(pinned)
                     )
                 )
+            case .installedApp(let app):
+                inspectorSubject = .installedApp(app)
             case .appLocation(let app, let loc):
                 inspectorSubject = .appLocation(
                     app,

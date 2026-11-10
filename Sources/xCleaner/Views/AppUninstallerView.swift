@@ -46,6 +46,13 @@ struct AppUninstallerView: View {
         .onAppear {
             if viewModel.installedApps.isEmpty && !viewModel.isScanningApps {
                 viewModel.launchAppScan()
+            } else if let firstApp = viewModel.installedApps.first {
+                switch viewModel.inspectorSubject {
+                case .installedApp, .appLocation:
+                    break
+                default:
+                    viewModel.inspectorSubject = .installedApp(firstApp)
+                }
             }
         }
     }
@@ -118,6 +125,16 @@ struct AppUninstallerView: View {
 
     private func installedAppCard(_ app: InstalledAppBundle) -> some View {
         let isExpanded = expandedAppIDs.contains(app.id)
+        let isSelected: Bool = {
+            switch viewModel.inspectorSubject {
+            case .installedApp(let sel):
+                return sel.id == app.id
+            case .appLocation(let sel, _):
+                return sel.id == app.id
+            default:
+                return false
+            }
+        }()
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
@@ -177,6 +194,7 @@ struct AppUninstallerView: View {
                     HStack(spacing: 6) {
                         if app.safeCacheBytes > 0 {
                             Button("Clean Caches") {
+                                viewModel.inspectorSubject = .installedApp(app)
                                 viewModel.stageAppSafeCaches(app)
                             }
                             .buttonStyle(.bordered)
@@ -185,6 +203,7 @@ struct AppUninstallerView: View {
                         }
 
                         Button("Reset App") {
+                            viewModel.inspectorSubject = .installedApp(app)
                             viewModel.stageAppReset(app)
                         }
                         .buttonStyle(.bordered)
@@ -192,6 +211,7 @@ struct AppUninstallerView: View {
                         .help("Factory reset: stage caches, support files & preferences while keeping the app bundle")
 
                         Button("Uninstall") {
+                            viewModel.inspectorSubject = .installedApp(app)
                             viewModel.stageFullAppUninstall(app)
                         }
                         .buttonStyle(.borderedProminent)
@@ -200,6 +220,10 @@ struct AppUninstallerView: View {
                         .help("Stage app bundle and all ~/Library leftovers for removal")
                     }
                 }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                viewModel.inspectorSubject = .installedApp(app)
             }
 
             // Expand disclosure
@@ -232,18 +256,37 @@ struct AppUninstallerView: View {
                 }
             }
         }
-        .xCleanerCard(padding: 12)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.035))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(isSelected ? Color.accentColor.opacity(0.65) : Color.primary.opacity(0.08), lineWidth: isSelected ? 1.5 : 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onTapGesture {
+            viewModel.inspectorSubject = .installedApp(app)
+        }
     }
 
     private func appLocationRow(app: InstalledAppBundle, location: AppAssociatedLocation) -> some View {
         let subject = InspectorSubject.appLocation(app, location)
         let isStaged = viewModel.isStaged(urls: [location.url])
+        let isLocSelected: Bool = {
+            if case .appLocation(let selApp, let selLoc) = viewModel.inspectorSubject {
+                return selApp.id == app.id && selLoc.id == location.id
+            }
+            return false
+        }()
 
         return HStack(spacing: 8) {
             StageCheckboxOrLockButton(
                 advisory: location.advisory,
                 isStaged: isStaged
             ) {
+                viewModel.inspectorSubject = subject
                 viewModel.toggleStage(subject: subject)
             }
 
@@ -271,7 +314,14 @@ struct AppUninstallerView: View {
             }
         }
         .padding(6)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.025)))
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isLocSelected ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.025))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(isLocSelected ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1)
+        )
         .contentShape(Rectangle())
         .onTapGesture {
             viewModel.inspectorSubject = subject
@@ -311,12 +361,19 @@ struct AppUninstallerView: View {
     private func orphanedRow(item: ScannableItem) -> some View {
         let subject = InspectorSubject.scannable(item)
         let isStaged = viewModel.isStaged(urls: item.allTargetURLs)
+        let isSelected: Bool = {
+            if case .scannable(let sel) = viewModel.inspectorSubject {
+                return sel.id == item.id
+            }
+            return false
+        }()
 
         return HStack(spacing: 10) {
             StageCheckboxOrLockButton(
                 advisory: item.advisory,
                 isStaged: isStaged
             ) {
+                viewModel.inspectorSubject = subject
                 viewModel.toggleStage(subject: subject)
             }
 
@@ -348,8 +405,15 @@ struct AppUninstallerView: View {
             }
         }
         .padding(12)
-        .xCleanerCard(padding: 12)
-        .contentShape(Rectangle())
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.035))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(isSelected ? Color.accentColor.opacity(0.65) : Color.primary.opacity(0.08), lineWidth: isSelected ? 1.5 : 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onTapGesture {
             viewModel.inspectorSubject = subject
         }

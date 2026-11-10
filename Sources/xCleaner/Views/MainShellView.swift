@@ -56,8 +56,8 @@ struct MainShellView: View {
                 viewModel.inspectorSubject = .scannable(first)
             }
         case .appUninstaller:
-            if let firstApp = viewModel.installedApps.first, let firstLoc = firstApp.locations.first {
-                viewModel.inspectorSubject = .appLocation(firstApp, firstLoc)
+            if let firstApp = viewModel.installedApps.first {
+                viewModel.inspectorSubject = .installedApp(firstApp)
             }
         case .toolchainsAndDocker:
             if let first = viewModel.toolchainItems.first {

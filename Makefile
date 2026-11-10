@@ -5,7 +5,7 @@ SWIFT_CACHE_FLAGS = --disable-sandbox --cache-path /tmp/xcleaner-spm-cache -Xswi
 
 .PHONY: all build release test app dmg run clean
 
-all: app
+all: app dmg
 
 build:
 	swift build $(SWIFT_CACHE_FLAGS)

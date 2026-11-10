@@ -133,7 +133,20 @@ struct AdvisoryInspectorView: View {
     private func metadataGrid(_ subject: InspectorSubject) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             metadataRow(label: "Source", value: subject.sourceLabel)
-            metadataRow(label: "Files / Targets", value: "\(subject.itemCount)")
+            if case .installedApp(let app) = subject {
+                if let bundleID = app.bundleID {
+                    metadataRow(label: "Bundle ID", value: bundleID)
+                }
+                if let ver = app.version {
+                    metadataRow(label: "Version", value: ver)
+                }
+                metadataRow(label: "Locations", value: "\(app.locations.count) associated")
+                if app.safeCacheBytes > 0 {
+                    metadataRow(label: "Safe Caches", value: ByteFormatting.string(from: app.safeCacheBytes))
+                }
+            } else {
+                metadataRow(label: "Files / Targets", value: "\(subject.itemCount)")
+            }
             metadataRow(label: "Last Activity", value: ByteFormatting.relativeAge(from: subject.lastModified))
         }
         .padding(10)
@@ -189,7 +202,9 @@ struct AdvisoryInspectorView: View {
         let adv = subject.advisory
 
         return VStack(alignment: .leading, spacing: 8) {
-            if adv.level == .protected {
+            if case .installedApp(let app) = subject {
+                installedAppActions(app: app, adv: adv, staged: staged, pinned: pinned)
+            } else if adv.level == .protected {
                 HStack(spacing: 8) {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 12.5, weight: .semibold))
@@ -265,6 +280,73 @@ struct AdvisoryInspectorView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func installedAppActions(app: InstalledAppBundle, adv: ItemAdvisory, staged: Bool, pinned: Bool) -> some View {
+        if app.isSystemProtected {
+            HStack(spacing: 8) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text("Protected System App (Removal Disabled)")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.primary.opacity(0.05))
+            )
+        } else if app.isRunning {
+            Button {
+                viewModel.quitAppAndRefreshLocks(bundleID: app.bundleID, appName: app.displayName)
+            } label: {
+                Label("Quit \(app.displayName) to Unlock", systemImage: "power")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color(nsColor: .systemOrange))
+        } else {
+            if app.safeCacheBytes > 0 {
+                Button {
+                    viewModel.stageAppSafeCaches(app)
+                } label: {
+                    Label("Clean Caches (\(ByteFormatting.string(from: app.safeCacheBytes)))", systemImage: "sparkles")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(pinned)
+            }
+
+            Button {
+                viewModel.stageAppReset(app)
+            } label: {
+                Label("Reset App (Keep App, Wipe Data)", systemImage: "arrow.counterclockwise")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(pinned)
+
+            Button {
+                if staged {
+                    viewModel.unstage(urls: [app.appURL] + app.locations.map(\.url))
+                } else {
+                    viewModel.stageFullAppUninstall(app)
+                }
+            } label: {
+                Label(
+                    staged ? "Remove from Cleanup Queue" : "Uninstall App & Leftovers",
+                    systemImage: staged ? "minus.circle.fill" : "trash.fill"
+                )
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(staged ? .secondary : Color(nsColor: .systemRed))
+            .disabled(pinned)
         }
     }
 }
